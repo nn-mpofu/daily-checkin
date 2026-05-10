@@ -368,7 +368,7 @@ Write only the one sentence, nothing else."""
 ---
 
 ## ✅ Progress
-{progress} tasks complete
+{progress if "no tasks" in progress else f"{progress} tasks complete"}
 
 ---
 
