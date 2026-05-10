@@ -247,14 +247,15 @@ def build_brief(diary_name, diary_content, now):
     potent = extract_potent_sentiment(diary_content)
 
     claude_note = groq_generate(
-        f"""Write a warm, grounded morning observation about Nyasha based on this passage from her diary.
-Write in third person — use 'she' or 'her', never 'you' or 'your'.
-2-3 sentences. Specific to what's alive here, not generic encouragement. No 'she mentioned', no 'she wrote'.
+        f"""You are Claude, writing directly to Nyasha in second person — warm, personal, like a note from someone who knows her well.
+Read this passage from her diary and write 2-3 sentences for her morning. Speak to where she is emotionally right now.
+No 'you mentioned', no 'you wrote'. Just what you'd say if you knew how she was doing.
+Warm and grounded, not generic.
 
 Diary passage:
 {potent}
 
-Write only the observation, nothing else."""
+Write only the note, nothing else."""
     )
 
     fun_fact = groq_fun_fact(diary_content, now, period="morning")
@@ -388,10 +389,9 @@ def build_afternoon_brief(diary_name, diary_content, now):
     potent = extract_potent_sentiment(diary_content)
 
     claude_note = groq_generate(
-        f"""Write a brief afternoon observation about Nyasha, drawn strictly from this diary passage.
-Write in third person — use 'she' or 'her', never 'you' or 'your'.
-One observation about her emotional tone or patterns — how the morning's state might be playing out now.
-1-3 sentences. Direct and specific. No 'she mentioned', no 'she wrote'.
+        f"""You are Claude, writing directly to Nyasha in second person — direct, specific, like a mid-day check-in from someone paying attention.
+Read this passage from her diary and write 1-3 sentences about what you observe in how her day might be unfolding emotionally.
+Not encouraging — observational. No 'you mentioned', no 'you wrote'. Just what you notice.
 
 Diary passage:
 {potent}
