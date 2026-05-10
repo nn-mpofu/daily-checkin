@@ -55,7 +55,8 @@ def fetch_latest_diary_entry():
             return None, None
         try:
             items = gh_get(path)
-        except Exception:
+        except Exception as e:
+            print(f"gh_get error at '{path}': {e}")
             return None, None
 
         dated = sorted(
