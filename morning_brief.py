@@ -18,7 +18,7 @@ import os, json, re, base64, urllib.request, urllib.parse
 from datetime import datetime
 import pytz
 
-GITHUB_TOKEN          = os.environ["GITHUB_TOKEN"]
+GITHUB_TOKEN          = os.environ.get("OBSIDIAN_TOKEN") or os.environ["GITHUB_TOKEN"]
 OBSIDIAN_REPO         = os.environ["OBSIDIAN_REPO"]
 OBSIDIAN_JOURNAL_PATH = os.environ.get("OBSIDIAN_JOURNAL_PATH", "")
 GROQ_API_KEY          = os.environ["GROQ_API_KEY"]

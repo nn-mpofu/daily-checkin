@@ -22,7 +22,7 @@ jobs:
 
       - name: Run morning check-in
         env:
-          GITHUB_TOKEN: ${{ secrets.OBSIDIAN_GITHUB_TOKEN }}
+          OBSIDIAN_TOKEN: ${{ secrets.OBSIDIAN_GITHUB_TOKEN }}
           OBSIDIAN_REPO: ${{ secrets.OBSIDIAN_REPO }}
           OBSIDIAN_JOURNAL_PATH: ${{ secrets.OBSIDIAN_JOURNAL_PATH }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
