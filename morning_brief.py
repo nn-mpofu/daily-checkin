@@ -24,8 +24,8 @@ def _env(key, default=""):
 GITHUB_TOKEN          = _env("OBSIDIAN_TOKEN") or _env("GITHUB_TOKEN")
 OBSIDIAN_REPO         = _env("OBSIDIAN_REPO")
 OBSIDIAN_JOURNAL_PATH = _env("OBSIDIAN_JOURNAL_PATH")
-GROQ_API_KEY          = os.environ["GROQ_API_KEY"]
-TICKTICK_ACCESS_TOKEN = os.environ["TICKTICK_ACCESS_TOKEN"]
+GROQ_API_KEY          = _env("GROQ_API_KEY")
+TICKTICK_ACCESS_TOKEN = _env("TICKTICK_ACCESS_TOKEN")
 
 TZ = pytz.timezone("Africa/Johannesburg")
 
