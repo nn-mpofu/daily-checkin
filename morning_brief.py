@@ -15,7 +15,7 @@ Afternoon only:
   TOGGL_WORKSPACE_ID    - Toggl workspace ID
 """
 
-import os, json, re, base64, urllib.request, urllib.parse
+import os, json, re, base64, hashlib, urllib.request, urllib.parse
 from datetime import datetime, timedelta
 import pytz
 
@@ -44,18 +44,52 @@ def gh_get(path):
     return json.loads(urllib.request.urlopen(req).read())
 
 
-def fetch_latest_diary_entry():
-    """Walk the journal folder tree to find the most recent dated .md file."""
-    SKIP = {"Report", "Review", "Habits", "Time", "Preview", "Template", "Index"}
+_SKIP = {"Report", "Review", "Habits", "Time", "Preview", "Template", "Index"}
 
-    def is_diary_file(name):
-        return (
-            name.endswith(".md")
-            and re.search(r"\d", name)
-            and not name.startswith("_")
-            and not any(s in name for s in SKIP)
-        )
+def _is_diary_file(name):
+    return (
+        name.endswith(".md")
+        and re.search(r"\d", name)
+        and not name.startswith("_")
+        and not any(s in name for s in _SKIP)
+    )
 
+def _day_ordinal(d):
+    if 11 <= d <= 13:
+        return f"{d}th"
+    return f"{d}{['th','st','nd','rd','th'][min(d % 10, 4)]}"
+
+def _read_file(item):
+    file_data = gh_get(item["path"])
+    return item["name"], base64.b64decode(file_data["content"]).decode("utf-8")
+
+def fetch_diary_for_day(now):
+    """Try today's diary file first; fall back to most recent."""
+    today_pattern = f"{now.strftime('%B')} {_day_ordinal(now.day)}"
+
+    # Search GitHub for today's file by name
+    query = urllib.parse.urlencode({
+        "q": f'filename:"{today_pattern}" repo:{OBSIDIAN_REPO} extension:md',
+        "per_page": 5,
+    })
+    req = urllib.request.Request(
+        f"https://api.github.com/search/code?{query}",
+        headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"},
+    )
+    try:
+        resp = json.loads(urllib.request.urlopen(req).read())
+        for item in resp.get("items", []):
+            if item["name"].endswith(".md") and today_pattern in item["name"]:
+                print(f"Found today's entry: {item['name']}")
+                return _read_file(item)
+    except Exception as e:
+        print(f"Today's diary search: {e}")
+
+    # Fall back to most recent
+    print("No entry for today yet — using most recent.")
+    return _fetch_latest()
+
+def _fetch_latest():
     def find_latest(path, depth=0):
         if depth > 8:
             return None, None
@@ -64,29 +98,61 @@ def fetch_latest_diary_entry():
         except Exception as e:
             print(f"gh_get error at '{path}': {e}")
             return None, None
-
         dated = sorted(
-            [i for i in items if i["type"] == "file" and is_diary_file(i["name"])],
-            key=lambda x: x["name"],
-            reverse=True,
+            [i for i in items if i["type"] == "file" and _is_diary_file(i["name"])],
+            key=lambda x: x["name"], reverse=True,
         )
         if dated:
-            file_data = gh_get(dated[0]["path"])
-            content = base64.b64decode(file_data["content"]).decode("utf-8")
-            return dated[0]["name"], content
-
-        dirs = sorted(
-            [i for i in items if i["type"] == "dir"],
-            key=lambda x: x["name"],
-            reverse=True,
-        )
+            return _read_file(dated[0])
+        dirs = sorted([i for i in items if i["type"] == "dir"], key=lambda x: x["name"], reverse=True)
         for d in dirs:
             name, content = find_latest(d["path"], depth + 1)
             if content:
                 return name, content
         return None, None
-
     return find_latest(OBSIDIAN_JOURNAL_PATH)
+
+# keep old name so nothing else breaks
+def fetch_latest_diary_entry():
+    return _fetch_latest()
+
+
+_FACT_ANGLES = [
+    "an etymology of a specific word that appears in or strongly relates to this diary",
+    "a psychological or neurological principle at play in this situation",
+    "a lesser-known historical figure whose life echoes these themes",
+    "a surprising anthropological or cross-cultural fact about this human experience",
+    "a philosophical idea from a non-Western tradition that resonates here",
+    "a biological or evolutionary fact that explains something in this emotional experience",
+    "an art, music, or literary reference that captures the exact emotional texture here",
+]
+
+def groq_fun_fact(diary_content, now, period="morning"):
+    # Date + period as seed = consistent per check-in, different each day and between AM/PM
+    seed = int(hashlib.md5(f"{now.strftime('%Y-%m-%d')}-{period}".encode()).hexdigest(), 16)
+    angle = _FACT_ANGLES[seed % len(_FACT_ANGLES)]
+    return groq_generate(
+        f"""Based on this diary excerpt, write one genuinely fascinating sentence using this angle: {angle}
+Be very specific — no generic observations. Do not reference Voltaire, Candide, or any gardening metaphor.
+
+Diary excerpt:
+{diary_content[:2000]}
+
+Write only the one sentence, nothing else."""
+    )
+
+
+def extract_potent_sentiment(diary_content):
+    """Pull the single most emotionally alive passage from the diary for sharper context."""
+    return groq_generate(
+        f"""Read this diary entry and identify the single most emotionally alive moment — the sentence or passage that most vividly captures the writer's inner state.
+Return only that passage, verbatim or very lightly condensed. 2-3 sentences max.
+
+Diary:
+{diary_content[:4000]}
+
+Return only the passage, nothing else."""
+    )
 
 
 def groq_generate(prompt):
@@ -177,27 +243,21 @@ def build_brief(diary_name, diary_content, now):
     print(f"Found {len(fragments)} tagged lines across vault")
     tagged_str = pick_pertinent(fragments, diary_content)
 
+    print("Extracting potent sentiment...")
+    potent = extract_potent_sentiment(diary_content)
+
     claude_note = groq_generate(
-        f"""You are writing a warm, personal morning note for someone named Nyasha.
-Read this diary excerpt carefully, absorb the emotional tone and themes, then set it aside.
-Write 2-3 sentences that feel personally written — not assembled. No citations, no 'you mentioned', no 'last night you wrote'. Just what you'd say if you knew how she was doing.
-Keep it warm, grounded, and encouraging without being generic.
+        f"""Write a warm, grounded morning observation about Nyasha based on this passage from her diary.
+Write in third person — use 'she' or 'her', never 'you' or 'your'.
+2-3 sentences. Specific to what's alive here, not generic encouragement. No 'she mentioned', no 'she wrote'.
 
-Diary excerpt:
-{diary_content[:3000]}
+Diary passage:
+{potent}
 
-Write only the note itself, nothing else."""
+Write only the observation, nothing else."""
     )
 
-    fun_fact = groq_generate(
-        f"""Based on the themes in this diary excerpt, write one sentence — an etymology, historical curiosity, or idea that connects to something the writer touched on (words used, philosophers referenced, metaphors, emotions).
-Make it genuinely interesting, not generic.
-
-Diary excerpt:
-{diary_content[:2000]}
-
-Write only the one sentence, nothing else."""
-    )
+    fun_fact = groq_fun_fact(diary_content, now, period="morning")
 
     day = str(now.day)  # no leading zero, works cross-platform
     timestamp = now.strftime(f"%a, {day} %B")
@@ -324,26 +384,22 @@ def build_afternoon_brief(diary_name, diary_content, now):
     print("Fetching Toggl summary...")
     toggl = fetch_toggl_summary()
 
-    claude_note = groq_generate(
-        f"""You are writing a brief afternoon observation for Nyasha, drawn strictly from her recent diary.
-One observation about her emotional tone or patterns — how the morning's state might be playing out now.
-1-3 sentences. Direct and specific. No 'you mentioned', no 'last night you wrote'.
+    print("Extracting potent sentiment...")
+    potent = extract_potent_sentiment(diary_content)
 
-Diary:
-{diary_content[:3000]}
+    claude_note = groq_generate(
+        f"""Write a brief afternoon observation about Nyasha, drawn strictly from this diary passage.
+Write in third person — use 'she' or 'her', never 'you' or 'your'.
+One observation about her emotional tone or patterns — how the morning's state might be playing out now.
+1-3 sentences. Direct and specific. No 'she mentioned', no 'she wrote'.
+
+Diary passage:
+{potent}
 
 Write only the observation, nothing else."""
     )
 
-    fun_fact = groq_generate(
-        f"""Based on the themes in this diary excerpt, write one sentence — an etymology, historical curiosity, or idea that connects to something the writer touched on.
-Make it genuinely interesting, not generic.
-
-Diary excerpt:
-{diary_content[:2000]}
-
-Write only the one sentence, nothing else."""
-    )
+    fun_fact = groq_fun_fact(diary_content, now, period="afternoon")
 
     day = str(now.day)
     timestamp = now.strftime(f"%a, {day} %B")
@@ -406,8 +462,8 @@ def main():
     test_mode = _env("TEST_MODE") == "1"
 
     now = datetime.now(TZ)
-    print(f"[{now.strftime('%H:%M')}] Mode: {mode} — fetching latest diary entry...")
-    diary_name, diary_content = fetch_latest_diary_entry()
+    print(f"[{now.strftime('%H:%M')}] Mode: {mode} — fetching diary entry...")
+    diary_name, diary_content = fetch_diary_for_day(now)
     if not diary_content:
         print("Could not find a diary entry. Check OBSIDIAN_REPO and OBSIDIAN_JOURNAL_PATH.")
         return
