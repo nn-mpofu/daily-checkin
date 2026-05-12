@@ -1,0 +1,31 @@
+name: Evening Check-in
+
+on:
+  schedule:
+    # 20:00 SAST = 18:00 UTC
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pytz
+
+      - name: Run evening check-in
+        env:
+          MODE: evening
+          OBSIDIAN_TOKEN: ${{ secrets.OBSIDIAN_GITHUB_TOKEN }}
+          OBSIDIAN_REPO: ${{ secrets.OBSIDIAN_REPO }}
+          OBSIDIAN_JOURNAL_PATH: ${{ secrets.OBSIDIAN_JOURNAL_PATH }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TICKTICK_ACCESS_TOKEN: ${{ secrets.TICKTICK_ACCESS_TOKEN }}
+        run: python daily_checkin.py

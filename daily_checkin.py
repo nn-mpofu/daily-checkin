@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-morning_brief.py — morning + afternoon check-ins for Nyasha.
-Set MODE=morning (default) or MODE=afternoon to switch.
+daily_checkin.py — morning, afternoon, and evening check-ins for Nyasha.
+Set MODE=morning (default), MODE=afternoon, or MODE=evening to switch.
 
 Required env vars (all modes):
   OBSIDIAN_TOKEN        - Fine-grained PAT, Contents: read on mon-atelier
@@ -10,9 +10,10 @@ Required env vars (all modes):
   GROQ_API_KEY          - Groq API key
   TICKTICK_ACCESS_TOKEN - TickTick OAuth access token (~180 day TTL)
 
-Afternoon only:
-  TOGGL_API_TOKEN       - Toggl API token (from toggl.com/profile)
-  TOGGL_WORKSPACE_ID    - Toggl workspace ID
+Thread across the day:
+  Morning  pulls  "Focus for Tomorrow"  from last night's Evening Check-in
+  Afternoon pulls "Focus for Today"     from Morning Check-in
+  Evening  pulls  "Focus for Today"     from Morning + "How's it going?" from Afternoon
 """
 
 import os, sys, json, re, base64, hashlib, urllib.request, urllib.parse
@@ -169,6 +170,15 @@ def _fetch_recent(count=4):
 
 def groq_fun_fact(diary_content, now, period="morning"):
     """Always etymological. Morning: tied to the diary's emotional weight. Afternoon: tied to action, momentum, or finishing."""
+    if period == "evening":
+        return groq_generate(
+            f"""Pick one word related to rest, reflection, closing, or renewal — ideally one that appears in this diary or naturally connects to ending the day — and write one genuinely fascinating sentence about its etymology.
+
+Name the language of origin, the original meaning, and trace how it shifted. One sentence only. No preamble.
+
+Diary excerpt for context:
+{diary_content[:2000]}"""
+        )
     if period == "afternoon":
         return groq_generate(
             f"""Pick one word from this list — persist, focus, effort, finish, momentum, resolve, drive, commit, rally, execute — whichever most naturally connects to themes in the diary below, then write one genuinely fascinating sentence about its etymology.
@@ -196,6 +206,18 @@ def groq_generate_quote(diary_content, period="morning"):
     """Morning: emotionally resonant. Afternoon: action, momentum, finishing strong."""
     if period == "afternoon":
         prompt = f"""Choose one real quote from a real, named person about momentum, finishing strong, focus, or the power of the second half. It should make someone want to act, not reflect. Avoid generic hustle quotes and overused phrases.
+
+Diary excerpt for context:
+{diary_content[:2000]}
+
+Respond with exactly two lines. Nothing before. Nothing after. No self-correction. No alternatives.
+Line 1: the quote wrapped in double quotation marks
+Line 2: an em dash and the author's full name
+
+"Like this."
+— Author Name"""
+    elif period == "evening":
+        prompt = f"""Choose one real quote from a real, named person about rest, reflection, closure, or the dignity of a day well-lived (or survived). Something that lets the reader breathe out. Avoid Rumi, Rilke, Maya Angelou, Brené Brown, and anything that appears on greeting cards.
 
 Diary excerpt for context:
 {diary_content[:2000]}
@@ -237,7 +259,14 @@ def groq_claude_note_with_mode(entries, today_tasks, tagged_fragments, period="m
     tasks_text = "\n".join(f"- {t}" for t in today_tasks) if today_tasks else "(no tasks scheduled today)"
     tags_text = "\n".join(f"- {f}" for f in tagged_fragments[:15]) if tagged_fragments else "(none)"
 
-    if period == "afternoon":
+    if period == "evening":
+        framing = """You are writing a short evening note for Nyasha — the day is done. Don't push her forward. Help her close gently and with dignity. Acknowledge what the day asked of her. Pick the mode that honestly fits."""
+        mode_hype = "🎯 HYPE — she ended the day strong, finished something real. Send her to bed proud."
+        mode_steady = "🤝 STEADY — it was a hard or heavy day. Don't recap the pain. Just remind her she made it through and tomorrow is clean."
+        mode_hard = "🔥 HARD HITTER — the day was wasted and she knows it. Say it with love, no lecture, and close on what tomorrow can be."
+        mode_celebrate = "🎉 CELEBRATOR — something genuinely good happened today. Make sure she actually feels it before she sleeps."
+        mode_witness = "🪞 WITNESS — she wrote or felt something today that she should carry into tomorrow. Name it clearly."
+    elif period == "afternoon":
         framing = """You are writing a short afternoon note for Nyasha — it's mid-day, the morning is behind her. Don't reflect on how she's feeling. Focus entirely on what's still possible in the hours ahead. Pick the mode that honestly fits and write something that moves her forward."""
         mode_hype = "🎯 HYPE — something significant is still happening today or still needs doing. Name it. Send her in."
         mode_steady = "🤝 STEADY — it's been a heavy day. Don't dwell. Just remind her she's still got time and still in it."
@@ -427,6 +456,15 @@ def build_brief(diary_name, diary_content, now):
     print(f"Found {len(fragments)} tagged lines across vault")
     tagged_str = pick_pertinent(fragments, diary_content)
 
+    print("Fetching focus from yesterday's evening...")
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    focus_from_yesterday = _fetch_checkin_section("Evening Check-in", "## 🌅 Focus for Tomorrow", yesterday)
+    focus_line = f"{focus_from_yesterday}\n→" if focus_from_yesterday else "→"
+    if focus_from_yesterday:
+        print(f"Found yesterday's focus: {focus_from_yesterday[:60]}")
+    else:
+        print("No evening focus found — leaving blank")
+
     print("Fetching today's tasks...")
     today_tasks = fetch_ticktick_today_tasks()
     print(f"Found {len(today_tasks)} tasks due today")
@@ -492,8 +530,8 @@ Water — 0 / 2000ml
 
 ---
 
-## 🤍 Promise to Myself
-→
+## 🎯 Focus for Today
+{focus_line}
 
 ---
 
@@ -569,25 +607,22 @@ def fetch_toggl_summary():
         return "(error fetching Toggl data)"
 
 
-def fetch_morning_promise(now):
-    """Find today's morning check-in in TickTick and extract the Promise to Myself.
-    Searches the inbox first, then falls back to scanning all projects.
-    Returns the promise text, or None if not found / still blank."""
-    today = datetime.now(TZ).strftime("%Y-%m-%d")
+def _fetch_checkin_section(title_keyword, section_header, date_str):
+    """Generic helper: find a TickTick check-in by title keyword + date,
+    extract the content under a given section header.
+    Returns the text or None if blank / not found."""
     headers = {"Authorization": f"Bearer {TICKTICK_ACCESS_TOKEN}"}
 
-    def _extract_promise(content):
-        match = re.search(
-            r'##\s*🤍\s*Promise to Myself\s*\n(.*?)(?:\n---|\n##|$)',
-            content, re.DOTALL
-        )
+    def _extract(content):
+        escaped = re.escape(section_header)
+        match = re.search(escaped + r'\s*\n(.*?)(?:\n---|\n##|$)', content, re.DOTALL)
         if match:
-            promise = match.group(1).strip()
-            if promise and promise != "→":
-                return promise
+            val = match.group(1).strip()
+            if val and val != "→":
+                return val
         return None
 
-    # Try inbox first (fastest)
+    # Try inbox first
     try:
         req = urllib.request.Request(
             "https://ticktick.com/open/v1/project/inbox116930458/tasks",
@@ -595,15 +630,15 @@ def fetch_morning_promise(now):
         )
         tasks = json.loads(urllib.request.urlopen(req).read())
         for task in tasks:
-            if "Morning Check-in" in (task.get("title") or "") and \
-               (task.get("dueDate") or "")[:10] == today:
-                promise = _extract_promise(task.get("content") or "")
-                if promise:
-                    return promise
-    except Exception as e:
-        print(f"Inbox fetch: {e}")
+            if title_keyword in (task.get("title") or "") and \
+               (task.get("dueDate") or "")[:10] == date_str:
+                val = _extract(task.get("content") or "")
+                if val:
+                    return val
+    except Exception:
+        pass
 
-    # Fall back: scan all projects
+    # Scan all projects
     try:
         req = urllib.request.Request(
             "https://ticktick.com/open/v1/project",
@@ -621,15 +656,15 @@ def fetch_morning_promise(now):
                 )
                 tasks = json.loads(urllib.request.urlopen(req).read())
                 for task in tasks:
-                    if "Morning Check-in" in (task.get("title") or "") and \
-                       (task.get("dueDate") or "")[:10] == today:
-                        promise = _extract_promise(task.get("content") or "")
-                        if promise:
-                            return promise
+                    if title_keyword in (task.get("title") or "") and \
+                       (task.get("dueDate") or "")[:10] == date_str:
+                        val = _extract(task.get("content") or "")
+                        if val:
+                            return val
             except Exception:
                 pass
-    except Exception as e:
-        print(f"Project scan: {e}")
+    except Exception:
+        pass
 
     return None
 
@@ -641,15 +676,13 @@ def build_afternoon_brief(diary_name, diary_content, now):
         entries = [(diary_name, diary_content)]
     print(f"Loaded {len(entries)} entries: {', '.join(n for n, _ in entries)}")
 
-    print("Fetching morning promise...")
-    promise = fetch_morning_promise(now)
-    if promise:
-        print(f"Found morning promise: {promise[:60]}...")
-        promise_str = promise
+    print("Fetching morning focus...")
+    today_str = now.strftime("%Y-%m-%d")
+    morning_focus = _fetch_checkin_section("Morning Check-in", "## 🎯 Focus for Today", today_str)
+    if morning_focus:
+        print(f"Found morning focus: {morning_focus[:60]}")
     else:
-        print("No morning promise found — falling back to Note to Self")
-        fragments = fetch_vault_tagged()
-        promise_str = pick_pertinent(fragments, diary_content)
+        print("No morning focus found — leaving blank")
 
     print("Fetching today's tasks...")
     today_tasks = fetch_ticktick_today_tasks()
@@ -692,8 +725,11 @@ Water — 0 / 2000ml
 
 ---
 
-## 🤍 Promise to Myself
-{promise_str}
+## 🎯 Today's Focus
+{morning_focus if morning_focus else "→"}
+
+## 🔍 How's it going?
+→
 
 ---
 
@@ -726,6 +762,108 @@ Water — 0 / 2000ml
     return title, brief
 
 
+# ── Evening ───────────────────────────────────────────────────────────────────
+
+def build_evening_brief(diary_name, diary_content, now):
+    today_str = now.strftime("%Y-%m-%d")
+
+    print("Fetching morning focus...")
+    morning_focus = _fetch_checkin_section("Morning Check-in", "## 🎯 Focus for Today", today_str)
+    if morning_focus:
+        print(f"Found morning focus: {morning_focus[:60]}")
+    else:
+        print("No morning focus found")
+
+    print("Fetching afternoon reflection...")
+    afternoon_reflection = _fetch_checkin_section("Afternoon Check-in", "## 🔍 How's it going?", today_str)
+    if afternoon_reflection:
+        print(f"Found afternoon reflection: {afternoon_reflection[:60]}")
+    else:
+        print("No afternoon reflection found")
+
+    print("Fetching recent diary entries for mode detection...")
+    entries = _fetch_recent(4)
+    if not entries:
+        entries = [(diary_name, diary_content)]
+    print(f"Loaded {len(entries)} entries: {', '.join(n for n, _ in entries)}")
+
+    print("Generating Claude's Note (mode detection)...")
+    claude_note = groq_claude_note_with_mode(entries, [], [], period="evening")
+
+    fun_fact = groq_fun_fact(diary_content, now, period="evening")
+
+    print("Generating quote...")
+    quote = groq_generate_quote(diary_content, period="evening")
+
+    day = str(now.day)
+    timestamp = now.strftime(f"%a, {day} %B")
+    title = f"🌙 Evening Check-in — {timestamp}"
+
+    focus_block = ""
+    if morning_focus or afternoon_reflection:
+        focus_block += f"## 🎯 Today's Focus\n{morning_focus if morning_focus else '—'}\n\n"
+        if afternoon_reflection:
+            focus_block += f"## 🔍 Afternoon Check\n{afternoon_reflection}\n\n"
+        focus_block += "## ✏️ How Did It Actually Go?\n→\n\n---\n"
+    else:
+        focus_block = "## ✏️ How Did Today Go?\n→\n\n---\n"
+
+    brief = f"""# Good evening, Nyasha.
+*How did the day go?*
+
+---
+
+## 😶 Mood
+⚪ —
+
+## 🧠 What's on your mind
+→
+
+---
+
+*Let's close this one out.*
+
+---
+
+{focus_block}
+## ✅ Today's Wins
+→
+→
+
+---
+
+## 🔁 What I'd Do Differently
+→
+
+---
+
+## 🌅 Focus for Tomorrow
+→
+
+---
+
+## 🌸 Something I Love About Myself
+→
+
+---
+
+## 📡 Claude's Note
+{claude_note}
+
+---
+
+## 🌀 Fun Fact
+{fun_fact}
+
+---
+
+> {quote}
+
+*Rest well.*"""
+
+    return title, brief
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -743,6 +881,9 @@ def main():
     if mode == "afternoon":
         title, brief = build_afternoon_brief(diary_name, diary_content, now)
         due = (now + timedelta(minutes=2)) if test_mode else now.replace(hour=14, minute=0, second=0, microsecond=0)
+    elif mode == "evening":
+        title, brief = build_evening_brief(diary_name, diary_content, now)
+        due = (now + timedelta(minutes=2)) if test_mode else now.replace(hour=20, minute=0, second=0, microsecond=0)
     else:
         print("Generating brief via Groq...")
         title, brief = build_brief(diary_name, diary_content, now)
