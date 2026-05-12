@@ -27,4 +27,4 @@ jobs:
           OBSIDIAN_JOURNAL_PATH: ${{ secrets.OBSIDIAN_JOURNAL_PATH }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TICKTICK_ACCESS_TOKEN: ${{ secrets.TICKTICK_ACCESS_TOKEN }}
-        run: python morning_brief.py
+        run: python daily_checkin.py
