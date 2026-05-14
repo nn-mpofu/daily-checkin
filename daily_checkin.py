@@ -170,32 +170,33 @@ def _fetch_recent(count=4):
 
 def groq_fun_fact(diary_content, now, period="morning"):
     """Always etymological. Morning: tied to the diary's emotional weight. Afternoon: tied to action, momentum, or finishing."""
+    _FUN_FACT_PROMPT = """Pick one word from this diary excerpt that carries real {angle} weight. Then write exactly two sentences:
+1. Quote the exact line from the diary where this word appears (or most strongly resonates) — introduce it as: 'You wrote: "..."'
+2. Give its etymology — language of origin, original meaning, how it shifted — and close with one specific observation about how that origin illuminates something in the writer's experience.
+
+Do not pick the word "consume". No preamble. No extra sentences.
+
+Diary excerpt:
+{content}"""
+
     if period == "evening":
-        return groq_generate(
-            f"""Pick one word related to rest, reflection, closing, or renewal — ideally one that appears in this diary or naturally connects to ending the day — and write one genuinely fascinating sentence about its etymology.
+        angle = "closing, restorative, or reflective"
+        word_hint = "related to rest, reflection, closing, or renewal"
+    elif period == "afternoon":
+        angle = "active, forward-moving"
+        word_hint = "from this list if it fits: persist, focus, effort, finish, momentum, resolve, drive, commit, rally, execute — otherwise the most action-oriented word in the entry"
+    else:
+        seed = int(hashlib.md5(f"{now.strftime('%Y-%m-%d')}-morning".encode()).hexdigest(), 16)
+        angle = "emotional or thematic"
+        word_hint = ["an unexpected word — not the most obvious one", "a quieter word, not the loudest one",
+                     "a word that carries contradiction", "a word that appears only once but lands hard"][seed % 4]
 
-Name the language of origin, the original meaning, and trace how it shifted. One sentence only. No preamble.
-
-Diary excerpt for context:
-{diary_content[:2000]}"""
-        )
-    if period == "afternoon":
-        return groq_generate(
-            f"""Pick one word from this list — persist, focus, effort, finish, momentum, resolve, drive, commit, rally, execute — whichever most naturally connects to themes in the diary below, then write one genuinely fascinating sentence about its etymology.
-
-Name the language of origin, the original meaning, and trace how it shifted into its modern sense. One sentence only. No preamble.
-
-Diary excerpt for context:
-{diary_content[:2000]}"""
-        )
-    # Seed a word-pick hint so it doesn't always land on the same word
-    seed = int(hashlib.md5(f"{now.strftime('%Y-%m-%d')}-morning".encode()).hexdigest(), 16)
-    skip_hint = ["the first emotionally charged word you see", "a word you haven't used before today",
-                 "an unexpected word — not the most obvious one", "a quieter word, not the loudest one in the entry"][seed % 4]
     return groq_generate(
-        f"""Pick one word from this diary excerpt that carries real emotional or thematic weight — {skip_hint} — then write one genuinely fascinating sentence about its etymology: where it came from, what it originally meant, and how that origin illuminates something about the writer's experience.
+        f"""Pick one word ({word_hint}) from this diary excerpt that carries real {angle} weight. Then write exactly two sentences:
+1. Quote the exact line from the diary where this word appears (or most strongly resonates) — introduce it as: You wrote: "[line]"
+2. Give its etymology — language of origin, original meaning, how it shifted — and close with one specific observation about how that origin deepens something in the writer's experience.
 
-Be specific: name the language of origin, the original meaning, and trace how it shifted. Do not pick the word "consume". One sentence only. No preamble.
+Do not pick the word "consume". No preamble. No extra sentences.
 
 Diary excerpt:
 {diary_content[:2000]}"""
@@ -204,8 +205,8 @@ Diary excerpt:
 
 def groq_generate_quote(diary_content, period="morning"):
     """Morning: emotionally resonant. Afternoon: action, momentum, finishing strong."""
-    if period == "afternoon":
-        prompt = f"""Choose one real quote from a real, named person about momentum, finishing strong, focus, or the power of the second half. It should make someone want to act, not reflect. Avoid generic hustle quotes and overused phrases.
+    if period == "evening":
+        prompt = f"""Choose one real quote from a real, named person about rest, reflection, closure, or the dignity of a day well-lived (or survived). Something that lets the reader breathe out. Avoid Rumi, Rilke, Maya Angelou, Brené Brown, and anything that appears on greeting cards. Choose something the reader is unlikely to have seen before.
 
 Diary excerpt for context:
 {diary_content[:2000]}
@@ -216,8 +217,8 @@ Line 2: an em dash and the author's full name
 
 "Like this."
 — Author Name"""
-    elif period == "evening":
-        prompt = f"""Choose one real quote from a real, named person about rest, reflection, closure, or the dignity of a day well-lived (or survived). Something that lets the reader breathe out. Avoid Rumi, Rilke, Maya Angelou, Brené Brown, and anything that appears on greeting cards.
+    elif period == "afternoon":
+        prompt = f"""Choose one real quote from a real, named person about momentum, finishing strong, focus, or the power of the second half. It should make someone want to act, not reflect. Avoid generic hustle quotes and overused phrases. Choose something the reader is unlikely to have seen before — not Muhammad Ali, not Winston Churchill.
 
 Diary excerpt for context:
 {diary_content[:2000]}
@@ -304,6 +305,7 @@ Tagged notes from her vault:
 RULES:
 - 2-3 sentences max. No more.
 - Sound like a close friend who pays close attention — not a life coach, not a therapist
+- Always ground the note in something specific — a line she wrote, a pattern across entries, a decision she made, something she named. Don't be abstract.
 - Never open with "I noticed", "You mentioned", "It seems like", or "I can see"
 - Never use gardening metaphors or any reference to cultivating, tending, or growing things
 - Never list anything
@@ -705,14 +707,14 @@ def build_afternoon_brief(diary_name, diary_content, now):
 
 ---
 
+## 🧠 What's on your mind
+→
+
 ## 😶 Mood
 ⚪ —
 
 ## ⚡ Energy
 ⚪ —
-
-## 🧠 What's on your mind
-→
 
 ---
 
@@ -804,9 +806,7 @@ def build_evening_brief(diary_name, diary_content, now):
         focus_block += f"## 🎯 Today's Focus\n{morning_focus if morning_focus else '—'}\n\n"
         if afternoon_reflection:
             focus_block += f"## 🔍 Afternoon Check\n{afternoon_reflection}\n\n"
-        focus_block += "## ✏️ How Did It Actually Go?\n→\n\n---\n"
-    else:
-        focus_block = "## ✏️ How Did Today Go?\n→\n\n---\n"
+        focus_block += "---\n"
 
     brief = f"""# Good evening, Nyasha.
 *How did the day go?*
