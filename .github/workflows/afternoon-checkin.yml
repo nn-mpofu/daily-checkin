@@ -1,9 +1,6 @@
 name: Afternoon Check-in
 
 on:
-  schedule:
-    # 12:00 SAST = 10:00 UTC
-    - cron: '0 10 * * *'
   workflow_dispatch:
 
 jobs:

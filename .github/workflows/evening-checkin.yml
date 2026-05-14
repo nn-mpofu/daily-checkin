@@ -1,9 +1,6 @@
 name: Evening Check-in
 
 on:
-  schedule:
-    # 20:00 SAST = 18:00 UTC
-    - cron: '0 18 * * *'
   workflow_dispatch:
 
 jobs:

@@ -1,9 +1,6 @@
 name: Morning Check-in
 
 on:
-  schedule:
-    # 05:00 SAST = 03:00 UTC
-    - cron: '0 3 * * *'
   workflow_dispatch:
 
 jobs:
